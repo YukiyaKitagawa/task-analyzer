@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>年次レポート — 活動ログ</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+<style>
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --surface2: #334155;
+    --text: #f1f5f9; --text2: #94a3b8; --accent: #38bdf8;
+    --green: #34d399; --orange: #fb923c;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+  h1 { font-size: 1.5rem; font-weight: 700; }
+  .year-nav { display: flex; align-items: center; gap: 8px; }
+  .year-nav button { background: var(--surface2); border: none; color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 1rem; }
+  .year-nav button:hover { background: var(--accent); color: var(--bg); }
+  .year-label { font-size: 1.1rem; font-weight: 600; min-width: 80px; text-align: center; }
+
+  .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stat-card { background: var(--surface); border-radius: 12px; padding: 16px; }
+  .stat-card .label { color: var(--text2); font-size: 0.8rem; margin-bottom: 4px; }
+  .stat-card .value { font-size: 1.5rem; font-weight: 700; }
+  .stat-card .value.hours { color: var(--accent); }
+  .stat-card .value.days { color: var(--green); }
+  .stat-card .value.location { color: var(--orange); font-size: 1.1rem; }
+
+  .card { background: var(--surface); border-radius: 12px; padding: 20px; }
+  .card h2 { font-size: 0.95rem; color: var(--text2); margin-bottom: 14px; font-weight: 600; }
+  .chart-wrap { position: relative; max-height: 240px; display: flex; justify-content: center; }
+  .chart-wrap-bar { position: relative; height: 300px; }
+
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+  @media (max-width: 900px) { .grid-3 { grid-template-columns: 1fr; } }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--surface2); font-size: 0.85rem; }
+  th { color: var(--text2); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
+  td.hours { color: var(--accent); font-weight: 600; text-align: right; }
+
+  .empty { color: var(--text2); text-align: center; padding: 40px; }
+  .loading { color: var(--text2); text-align: center; padding: 60px; font-size: 1.1rem; }
+  a { color: var(--accent); text-decoration: none; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div style="display:flex;align-items:center;gap:12px">
+      <h1>Yearly Report</h1>
+      <a href="index.html">← 月次レポート</a>
+    </div>
+    <div class="year-nav">
+      <button id="prevYear">&lt;</button>
+      <span class="year-label" id="yearLabel"></span>
+      <button id="nextYear">&gt;</button>
+    </div>
+  </header>
+  <div id="content"><div class="loading">読み込み中...</div></div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://jkacguhaabaqtrjaahgl.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImprYWNndWhhYWJhcXRyamFhaGdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxNTIxNjAsImV4cCI6MjA5NzcyODE2MH0.6BnIs9aq4pM9DKicbdiEBG95fvw4Oyihd4YW4_Q1U4c";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const CATEGORY_COLORS = {
+  "CAD": "#f59e0b", "設計": "#ef4444", "測量": "#22c55e", "点群": "#06b6d4",
+  "文書": "#8b5cf6", "文書作成": "#a78bfa", "資料作成": "#3b82f6",
+  "集計・表計算": "#14b8a6", "画像": "#f472b6", "動画": "#fb923c",
+  "開発": "#38bdf8", "メール": "#a3e635",
+  "会議": "#ef4444", "Web作業": "#818cf8", "AI活用": "#34d399",
+  "調査・リサーチ": "#fbbf24", "その他": "#64748b", "不明": "#dc2626",
+};
+
+const DL_OPTS = {
+  color: "#fff", font: { size: 11, weight: "bold" },
+  formatter: (val, ctx) => { const total = ctx.dataset.data.reduce((a,b) => a+b, 0); const pct = (val/total*100).toFixed(0); return pct >= 5 ? pct+"%" : ""; }
+};
+
+let currentYear = new Date().getFullYear();
+let barChart = null, pieChart = null, locChart = null;
+
+async function loadData() {
+  const start = `${currentYear}-01-01`;
+  const end = `${currentYear + 1}-01-01`;
+  document.getElementById("yearLabel").textContent = `${currentYear}年`;
+
+  const { data: scans } = await sb.from("activity_scans")
+    .select("*").gte("scan_date", start).lt("scan_date", end).order("scan_date");
+
+  if (!scans || scans.length === 0) {
+    document.getElementById("content").innerHTML = '<div class="empty">この年のデータはありません</div>';
+    return;
+  }
+
+  const scanIds = scans.map(s => s.id);
+  const { data: timeLogs } = await sb.from("activity_time_logs")
+    .select("*").in("scan_id", scanIds);
+
+  render(scans, timeLogs || []);
+}
+
+function render(scans, timeLogs) {
+  const totalHours = timeLogs.reduce((s, t) => s + parseFloat(t.hours), 0);
+  const workDays = scans.filter(s => s.review_status !== "draft").length;
+  const avgHours = workDays > 0 ? (totalHours / workDays).toFixed(1) : "0";
+
+  const locMap = {};
+  scans.forEach(s => { if (s.work_location) locMap[s.work_location] = (locMap[s.work_location] || 0) + 1; });
+  const topLocation = Object.entries(locMap).sort((a,b) => b[1]-a[1])[0];
+
+  const catMap = {};
+  timeLogs.forEach(t => { catMap[t.category] = (catMap[t.category] || 0) + parseFloat(t.hours); });
+  const catSorted = Object.entries(catMap).sort((a,b) => b[1]-a[1]);
+
+  // 月別カテゴリ集計
+  const allCats = [...new Set(timeLogs.map(t => t.category))];
+  const monthCatData = {};
+  allCats.forEach(cat => { monthCatData[cat] = new Array(12).fill(0); });
+  timeLogs.forEach(t => {
+    const scan = scans.find(s => s.id === t.scan_id);
+    if (scan) {
+      const mIdx = parseInt(scan.scan_date.substring(5, 7)) - 1;
+      monthCatData[t.category][mIdx] += parseFloat(t.hours);
+    }
+  });
+
+  let html = `
+    <div class="stats-row">
+      <div class="stat-card"><div class="label">年間合計時間</div><div class="value hours">${totalHours.toFixed(1)}h</div></div>
+      <div class="stat-card"><div class="label">稼働日数</div><div class="value days">${workDays}日</div></div>
+      <div class="stat-card"><div class="label">1日平均</div><div class="value hours">${avgHours}h</div></div>
+      <div class="stat-card"><div class="label">主な作業場所</div><div class="value location">${topLocation ? topLocation[0] : "-"}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <h2>月別作業時間（カテゴリ積み上げ）</h2>
+      <div class="chart-wrap-bar"><canvas id="barChart"></canvas></div>
+    </div>
+
+    <div class="grid-3">
+      <div class="card">
+        <h2>年間活動比率</h2>
+        <div class="chart-wrap"><canvas id="pieChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>作業場所の内訳</h2>
+        <div class="chart-wrap"><canvas id="locChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>カテゴリ別 年間時間</h2>
+        <table>
+          <thead><tr><th>カテゴリ</th><th style="text-align:right">時間</th><th>割合</th></tr></thead>
+          <tbody>
+            ${catSorted.map(([cat, h]) => {
+              const pct = totalHours > 0 ? (h / totalHours * 100).toFixed(1) : 0;
+              return `<tr><td>${cat}</td><td class="hours">${h.toFixed(1)}h</td><td>${pct}%</td></tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("content").innerHTML = html;
+
+  // 積み上げ棒グラフ
+  if (barChart) barChart.destroy();
+  const barCtx = document.getElementById("barChart").getContext("2d");
+  const months = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+  barChart = new Chart(barCtx, {
+    type: "bar",
+    data: {
+      labels: months,
+      datasets: allCats.map(cat => ({
+        label: cat, data: monthCatData[cat],
+        backgroundColor: CATEGORY_COLORS[cat] || "#64748b",
+      }))
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true, ticks: { color: "#94a3b8" }, grid: { display: false } },
+        y: { stacked: true, ticks: { color: "#94a3b8", callback: v => v + "h" }, grid: { color: "#334155" } }
+      },
+      plugins: {
+        legend: { position: "bottom", labels: { color: "#f1f5f9", font: { size: 11 }, padding: 10, boxWidth: 14 } },
+        datalabels: { display: false }
+      }
+    },
+    plugins: [ChartDataLabels]
+  });
+
+  // 活動比率
+  if (pieChart) pieChart.destroy();
+  const pieCtx = document.getElementById("pieChart").getContext("2d");
+  pieChart = new Chart(pieCtx, {
+    type: "doughnut",
+    data: {
+      labels: catSorted.map(([c]) => c),
+      datasets: [{ data: catSorted.map(([,h]) => h), backgroundColor: catSorted.map(([c]) => CATEGORY_COLORS[c] || "#64748b"), borderWidth: 0 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      plugins: {
+        legend: { position: "bottom", labels: { color: "#f1f5f9", font: { size: 11 }, padding: 10 } },
+        datalabels: DL_OPTS
+      }
+    },
+    plugins: [ChartDataLabels]
+  });
+
+  // 場所グラフ
+  if (locChart) locChart.destroy();
+  const locCtx = document.getElementById("locChart").getContext("2d");
+  const locEntries = Object.entries(locMap).sort((a,b) => b[1]-a[1]);
+  const locColors = ["#fb923c", "#38bdf8", "#34d399", "#f472b6", "#fbbf24", "#818cf8"];
+  locChart = new Chart(locCtx, {
+    type: "doughnut",
+    data: {
+      labels: locEntries.map(([l]) => l),
+      datasets: [{ data: locEntries.map(([,c]) => c), backgroundColor: locEntries.map((_,i) => locColors[i % locColors.length]), borderWidth: 0 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      plugins: {
+        legend: { position: "bottom", labels: { color: "#f1f5f9", font: { size: 11 }, padding: 10 } },
+        datalabels: DL_OPTS
+      }
+    },
+    plugins: [ChartDataLabels]
+  });
+}
+
+document.getElementById("prevYear").onclick = () => { currentYear--; loadData(); };
+document.getElementById("nextYear").onclick = () => { currentYear++; loadData(); };
+
+loadData();
+</script>
+</body>
+</html>

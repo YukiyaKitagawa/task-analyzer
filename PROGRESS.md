@@ -1,0 +1,37 @@
+# 進捗ログ
+
+## 2026-06-24: プロジェクト開始
+- 業務フローの分析・ロードマップ策定
+- Phase 1 / Step 1 完了: ファイルスキャン＋拡張子分類スクリプト作成
+  - `src/scan-files.mjs` — OneDrive全体を対象に当日08:00以降の更新ファイルを検出・分類
+  - `output/draft-2026-06-24.md` — テスト実行で20件検出（画像17, 資料1, その他2）
+  - 除外ルール: node_modules, .git, .tmp等のノイズ自動除外
+- Phase 1 / Step 2 完了: 活動要約の自動生成
+  - `src/generate-summary.mjs` — スキャン結果から活動推定・時間帯分析・LINE通知文案を生成
+  - `output/summary-2026-06-24.md` — テスト生成成功（資料作成、スクショ15枚、画像操作を推定）
+- Phase 1 / Step 2 拡張: ブラウザ履歴＋空白時間検出を追加
+  - `src/scan-browser.mjs` — Chrome/Edge/Brave 3ブラウザの履歴を統合取得（203件検出）
+  - `src/generate-summary.mjs` — ファイル＋Web活動の統合要約、2時間以上の空白時間アラート対応
+  - 推定活動: 資料作成、Zoom会議、Gmail、GitHub、AI活用(ChatGPT/Claude 53件)、supabase調査など
+- Phase 1 / Step 3: Supabaseログ保存
+  - activity_scans / file_logs / browser_logs テーブル作成（NAGANO プロジェクト）
+  - `src/export-for-db.mjs` — スキャン結果からSQL生成
+  - 2026-06-24分データ投入完了（スキャン1件、ファイル20件、ブラウザ30件）
+- Phase 2: レビュー対話フロー
+  - `src/run-all.mjs` — 全パイプライン一発実行スクリプト
+  - レビュー反映: スクショ・GitHub除外、AI活用をチャットタイトル別に細分化、調査系を検索キーワード＋サイト別に細分化、その他カテゴリ追加
+  - 除外ルール: スクショ=一時ログ、GitHub=一時ログとしてユーザー確認済み
+- Phase 3: LINE通知
+  - LINE Bot MCP Server 接続完了（@line/line-bot-mcp-server）
+  - 2026-06-24分の活動要約をLINE送信成功
+  - 監査ログ: activity_scansにline_sent_at, line_message_id, line_status列追加
+  - 2026-06-24分の送信記録をSupabaseに保存完了
+- 活動時間入力フロー
+  - `activity_time_logs` テーブル作成、`activity_scans` に work_location/main_task 追加
+  - `src/parse-time-input.mjs` — 2行入力パーサー（分類+時間、場所+作業内容）
+  - 未知の分類は「不明」として仮記録、集計サイトで修正する方針
+  - 2026-06-24分: 資料作成2.5h, AI活用5h, その他0.5h（計8h）、事務所、プレゼン資料作成
+- LINE返信→Supabase自動記録
+  - Supabase Edge Function `line-webhook` デプロイ（全角スペース対応済み）
+  - LINE Webhook接続完了、自動応答OFF設定済み
+  - LINE返信テスト成功（6/25分: 資料2.5h, AI5h, 他0.5h）

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>活動ログ レポート</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+<style>
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --surface2: #334155;
+    --text: #f1f5f9; --text2: #94a3b8; --accent: #38bdf8; --accent2: #818cf8;
+    --green: #34d399; --orange: #fb923c; --pink: #f472b6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+  h1 { font-size: 1.5rem; font-weight: 700; }
+  .month-nav { display: flex; align-items: center; gap: 8px; }
+  .month-nav button { background: var(--surface2); border: none; color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 1rem; }
+  .month-nav button:hover { background: var(--accent); color: var(--bg); }
+  .month-label { font-size: 1.1rem; font-weight: 600; min-width: 120px; text-align: center; }
+
+  .main-layout { display: flex; gap: 20px; align-items: start; }
+  .left-col { flex: 1; min-width: 0; }
+  .left-col .card { overflow-x: auto; }
+  .right-col { width: 380px; flex-shrink: 0; }
+  @media (max-width: 1100px) { .main-layout { flex-direction: column; } .right-col { width: 100%; } }
+
+  .left-col { display: flex; flex-direction: column; gap: 16px; }
+  .right-col { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 20px; }
+
+  .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  @media (max-width: 900px) { .stats-row { grid-template-columns: repeat(2, 1fr); } }
+  .stat-card { background: var(--surface); border-radius: 12px; padding: 16px; }
+  .stat-card .label { color: var(--text2); font-size: 0.8rem; margin-bottom: 4px; }
+  .stat-card .value { font-size: 1.5rem; font-weight: 700; }
+  .stat-card .value.hours { color: var(--accent); }
+  .stat-card .value.days { color: var(--green); }
+  .stat-card .value.location { color: var(--orange); font-size: 1.1rem; }
+
+  .card { background: var(--surface); border-radius: 12px; padding: 20px; }
+  .card h2 { font-size: 0.95rem; color: var(--text2); margin-bottom: 14px; font-weight: 600; }
+  .chart-wrap { position: relative; max-height: 220px; display: flex; justify-content: center; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--surface2); font-size: 0.85rem; }
+  th { color: var(--text2); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
+  td.hours { color: var(--accent); font-weight: 600; text-align: right; }
+  td.location { color: var(--orange); }
+  td.task { color: var(--text2); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.date { white-space: nowrap; }
+
+  .day-categories { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .day-cat { font-size: 0.7rem; padding: 1px 6px; border-radius: 3px; background: var(--surface2); color: var(--text2); }
+  .day-cat.unknown { background: #7f1d1d; color: #fca5a5; cursor: pointer; }
+  .day-cat.unknown:hover { background: #991b1b; }
+
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal { background: var(--surface); border-radius: 12px; padding: 24px; min-width: 320px; }
+  .modal h3 { font-size: 1rem; margin-bottom: 16px; }
+  .modal select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--surface2); background: var(--bg); color: var(--text); font-size: 0.95rem; margin-bottom: 16px; }
+  .modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
+  .modal-btns button { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 0.9rem; }
+  .btn-save { background: var(--accent); color: var(--bg); font-weight: 600; }
+  .btn-cancel { background: var(--surface2); color: var(--text); }
+
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+  .tag-unknown { background: #7f1d1d; color: #fca5a5; }
+
+  .empty { color: var(--text2); text-align: center; padding: 40px; }
+  .loading { color: var(--text2); text-align: center; padding: 60px; font-size: 1.1rem; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Activity Report</h1>
+    <a href="yearly.html" style="color:var(--accent);font-size:0.85rem;text-decoration:none;margin-left:12px">年次レポート →</a>
+    <div class="month-nav">
+      <button id="prevMonth">&lt;</button>
+      <span class="month-label" id="monthLabel"></span>
+      <button id="nextMonth">&gt;</button>
+    </div>
+  </header>
+
+  <div id="content"><div class="loading">読み込み中...</div></div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://jkacguhaabaqtrjaahgl.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImprYWNndWhhYWJhcXRyamFhaGdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxNTIxNjAsImV4cCI6MjA5NzcyODE2MH0.6BnIs9aq4pM9DKicbdiEBG95fvw4Oyihd4YW4_Q1U4c";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const CATEGORY_COLORS = {
+  "CAD": "#f59e0b", "設計": "#ef4444", "測量": "#22c55e", "点群": "#06b6d4",
+  "文書": "#8b5cf6", "文書作成": "#a78bfa", "資料作成": "#3b82f6",
+  "集計・表計算": "#14b8a6", "画像": "#f472b6", "動画": "#fb923c",
+  "開発": "#38bdf8", "メール": "#a3e635",
+  "会議": "#ef4444", "Web作業": "#818cf8", "AI活用": "#34d399",
+  "調査・リサーチ": "#fbbf24", "その他": "#64748b", "不明": "#dc2626",
+};
+
+let currentDate = new Date();
+let pieChart = null, locChart = null;
+
+function getMonthRange(d) {
+  const y = d.getFullYear(), m = d.getMonth();
+  const start = `${y}-${String(m+1).padStart(2,"0")}-01`;
+  const end = m === 11 ? `${y+1}-01-01` : `${y}-${String(m+2).padStart(2,"0")}-01`;
+  return { start, end };
+}
+
+async function loadData() {
+  const { start, end } = getMonthRange(currentDate);
+  document.getElementById("monthLabel").textContent =
+    `${currentDate.getFullYear()}年${currentDate.getMonth()+1}月`;
+
+  const { data: scans } = await sb.from("activity_scans")
+    .select("*").gte("scan_date", start).lt("scan_date", end).order("scan_date", { ascending: false });
+
+  if (!scans || scans.length === 0) {
+    document.getElementById("content").innerHTML = '<div class="empty">この月のデータはありません</div>';
+    return;
+  }
+
+  const scanIds = scans.map(s => s.id);
+  const { data: timeLogs } = await sb.from("activity_time_logs")
+    .select("*").in("scan_id", scanIds);
+
+  render(scans, timeLogs || []);
+}
+
+function render(scans, timeLogs) {
+  const totalHours = timeLogs.reduce((s, t) => s + parseFloat(t.hours), 0);
+  const workDays = scans.filter(s => s.review_status !== "draft").length;
+  const avgHours = workDays > 0 ? (totalHours / workDays).toFixed(1) : "0";
+
+  const locMap = {};
+  scans.forEach(s => {
+    if (s.work_location) locMap[s.work_location] = (locMap[s.work_location] || 0) + 1;
+  });
+  const topLocation = Object.entries(locMap).sort((a,b) => b[1]-a[1])[0];
+
+  const catMap = {};
+  timeLogs.forEach(t => {
+    catMap[t.category] = (catMap[t.category] || 0) + parseFloat(t.hours);
+  });
+  const catSorted = Object.entries(catMap).sort((a,b) => b[1]-a[1]);
+
+  let html = `
+    <div class="stats-row">
+      <div class="stat-card"><div class="label">合計作業時間</div><div class="value hours">${totalHours.toFixed(1)}h</div></div>
+      <div class="stat-card"><div class="label">稼働日数</div><div class="value days">${workDays}日</div></div>
+      <div class="stat-card"><div class="label">1日平均</div><div class="value hours">${avgHours}h</div></div>
+      <div class="stat-card"><div class="label">主な作業場所</div><div class="value location">${topLocation ? topLocation[0] : "-"}</div></div>
+    </div>
+
+    <div class="main-layout">
+      <div class="left-col">
+        <div class="card">
+          <h2>日別ログ</h2>
+          <table>
+            <thead><tr><th>日付</th><th>場所</th><th>作業内容</th><th>カテゴリ内訳</th><th style="text-align:right">時間</th></tr></thead>
+            <tbody>
+              ${scans.map(s => {
+                const dayLogs = timeLogs.filter(t => t.scan_id === s.id);
+                const dayTotal = dayLogs.reduce((sum, t) => sum + parseFloat(t.hours), 0);
+                const cats = dayLogs
+                  .filter(t => parseFloat(t.hours) > 0)
+                  .sort((a,b) => parseFloat(b.hours) - parseFloat(a.hours))
+                  .map(t => {
+                    if (t.category === "不明") {
+                      const orig = t.original_input ? ` (${t.original_input})` : "";
+                      return `<span class="day-cat unknown" onclick="openReclassify('${t.id}', ${parseFloat(t.hours)}, '${(t.original_input||"").replace(/'/g,"")}')" title="クリックで再分類">⚠ 不明${orig} ${parseFloat(t.hours)}h</span>`;
+                    }
+                    return `<span class="day-cat">${t.category} ${parseFloat(t.hours)}h</span>`;
+                  }).join("");
+                return `<tr>
+                  <td class="date">${s.scan_date}</td>
+                  <td class="location">${s.work_location || "-"}</td>
+                  <td class="task" title="${s.main_task || ""}">${s.main_task || "-"}</td>
+                  <td><div class="day-categories">${cats || "-"}</div></td>
+                  <td class="hours">${dayTotal > 0 ? dayTotal.toFixed(1) + "h" : "-"}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="right-col">
+        <div class="card">
+          <h2>活動比率</h2>
+          <div class="chart-wrap"><canvas id="pieChart"></canvas></div>
+        </div>
+        <div class="card">
+          <h2>作業場所の内訳</h2>
+          <div class="chart-wrap"><canvas id="locChart"></canvas></div>
+        </div>
+        <div class="card">
+          <h2>カテゴリ別 作業時間</h2>
+          <table>
+            <thead><tr><th>カテゴリ</th><th style="text-align:right">時間</th><th>割合</th></tr></thead>
+            <tbody>
+              ${catSorted.map(([cat, h]) => {
+                const pct = totalHours > 0 ? (h / totalHours * 100).toFixed(1) : 0;
+                const unknownTag = cat === "不明" ? ' <span class="tag tag-unknown">要修正</span>' : "";
+                return `<tr><td>${cat}${unknownTag}</td><td class="hours">${h.toFixed(1)}h</td><td>${pct}%</td></tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("content").innerHTML = html;
+
+  if (pieChart) pieChart.destroy();
+  const pieCtx = document.getElementById("pieChart").getContext("2d");
+  pieChart = new Chart(pieCtx, {
+    type: "doughnut",
+    data: {
+      labels: catSorted.map(([c]) => c),
+      datasets: [{
+        data: catSorted.map(([,h]) => h),
+        backgroundColor: catSorted.map(([c]) => CATEGORY_COLORS[c] || "#64748b"),
+        borderWidth: 0,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      plugins: {
+        legend: { position: "bottom", labels: { color: "#f1f5f9", font: { size: 11 }, padding: 10 } },
+        datalabels: { color: "#fff", font: { size: 11, weight: "bold" }, formatter: (val, ctx) => { const total = ctx.dataset.data.reduce((a,b) => a+b, 0); const pct = (val/total*100).toFixed(0); return pct >= 5 ? pct+"%" : ""; } }
+      }
+    },
+    plugins: [ChartDataLabels]
+  });
+
+  if (locChart) locChart.destroy();
+  const locCtx = document.getElementById("locChart").getContext("2d");
+  const locEntries = Object.entries(locMap).sort((a,b) => b[1]-a[1]);
+  const locColors = ["#fb923c", "#38bdf8", "#34d399", "#f472b6", "#fbbf24", "#818cf8"];
+  locChart = new Chart(locCtx, {
+    type: "doughnut",
+    data: {
+      labels: locEntries.map(([l]) => l),
+      datasets: [{
+        data: locEntries.map(([,c]) => c),
+        backgroundColor: locEntries.map((_,i) => locColors[i % locColors.length]),
+        borderWidth: 0,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      plugins: {
+        legend: { position: "bottom", labels: { color: "#f1f5f9", font: { size: 11 }, padding: 10 } },
+        datalabels: { color: "#fff", font: { size: 11, weight: "bold" }, formatter: (val, ctx) => { const total = ctx.dataset.data.reduce((a,b) => a+b, 0); const pct = (val/total*100).toFixed(0); return pct >= 5 ? pct+"%" : ""; } }
+      }
+    },
+    plugins: [ChartDataLabels]
+  });
+}
+
+const ALL_CATEGORIES = [
+  "CAD", "設計", "測量", "点群", "文書", "文書作成", "資料作成",
+  "集計・表計算", "画像", "動画", "開発", "メール",
+  "会議", "Web作業", "AI活用", "調査・リサーチ", "その他"
+];
+
+function openReclassify(logId, hours, originalInput) {
+  const options = ALL_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join("");
+  const modal = document.createElement("div");
+  modal.className = "modal-overlay";
+  modal.innerHTML = `
+    <div class="modal">
+      <h3>「${originalInput || "不明"}」(${hours}h) を再分類</h3>
+      <select id="reclassSelect">${options}</select>
+      <div class="modal-btns">
+        <button class="btn-cancel" onclick="this.closest('.modal-overlay').remove()">キャンセル</button>
+        <button class="btn-save" onclick="saveReclassify('${logId}')">保存</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
+}
+
+async function saveReclassify(logId) {
+  const select = document.getElementById("reclassSelect");
+  const newCategory = select.value;
+  const source = ["会議","Web作業","AI活用","調査・リサーチ","その他"].includes(newCategory) ? "web" : "file";
+  const { error } = await sb.from("activity_time_logs").update({ category: newCategory, source }).eq("id", logId);
+  document.querySelector(".modal-overlay")?.remove();
+  if (error) {
+    alert("保存に失敗しました: " + error.message);
+  } else {
+    loadData();
+  }
+}
+
+document.getElementById("prevMonth").onclick = () => {
+  currentDate.setMonth(currentDate.getMonth() - 1);
+  loadData();
+};
+document.getElementById("nextMonth").onclick = () => {
+  currentDate.setMonth(currentDate.getMonth() + 1);
+  loadData();
+};
+
+loadData();
+</script>
+</body>
+</html>
