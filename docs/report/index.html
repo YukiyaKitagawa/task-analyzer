@@ -114,8 +114,12 @@ const CATEGORY_COLORS = {
   "調査・リサーチ": "#fbbf24", "その他": "#64748b", "不明": "#dc2626",
 };
 
+const LOCATION_GROUPS = ["事務所", "研修", "現場", "現場見学", "学校", "その他"];
+const LOC_GROUP_COLORS = { "事務所": "#fb923c", "研修": "#38bdf8", "現場": "#34d399", "現場見学": "#a78bfa", "学校": "#f472b6", "その他": "#64748b" };
+
 let currentDate = new Date();
 let pieChart = null, locChart = null;
+let locGroupMap = {};
 
 function getMonthRange(d) {
   const y = d.getFullYear(), m = d.getMonth();
@@ -124,10 +128,22 @@ function getMonthRange(d) {
   return { start, end };
 }
 
+async function loadLocGroups() {
+  const { data } = await sb.from("location_groups").select("*");
+  locGroupMap = {};
+  (data || []).forEach(r => { locGroupMap[r.location_name] = r.group_name; });
+}
+
+function getLocGroup(locName) {
+  return locGroupMap[locName] || null;
+}
+
 async function loadData() {
   const { start, end } = getMonthRange(currentDate);
   document.getElementById("monthLabel").textContent =
     `${currentDate.getFullYear()}年${currentDate.getMonth()+1}月`;
+
+  await loadLocGroups();
 
   const { data: scans } = await sb.from("activity_scans")
     .select("*").gte("scan_date", start).lt("scan_date", end).order("scan_date", { ascending: false });
@@ -140,20 +156,31 @@ async function loadData() {
   const scanIds = scans.map(s => s.id);
   const { data: timeLogs } = await sb.from("activity_time_logs")
     .select("*").in("scan_id", scanIds);
+  const { data: locLogs } = await sb.from("location_time_logs")
+    .select("*").in("scan_id", scanIds);
 
-  render(scans, timeLogs || []);
+  render(scans, timeLogs || [], locLogs || []);
 }
 
-function render(scans, timeLogs) {
+function render(scans, timeLogs, locLogs) {
   const totalHours = timeLogs.reduce((s, t) => s + parseFloat(t.hours), 0);
-  const workDays = scans.filter(s => s.review_status !== "draft").length;
+  const workDays = scans.filter(s => s.review_status !== "draft" && s.review_status !== "holiday").length;
   const avgHours = workDays > 0 ? (totalHours / workDays).toFixed(1) : "0";
 
-  const locMap = {};
-  scans.forEach(s => {
-    if (s.work_location) locMap[s.work_location] = (locMap[s.work_location] || 0) + 1;
+  // 場所をグループ別に時間集計
+  const locGroupHours = {};
+  const ungroupedLocs = new Set();
+  locLogs.forEach(l => {
+    const group = getLocGroup(l.location);
+    if (group) {
+      locGroupHours[group] = (locGroupHours[group] || 0) + parseFloat(l.hours);
+    } else {
+      locGroupHours["その他"] = (locGroupHours["その他"] || 0) + parseFloat(l.hours);
+      ungroupedLocs.add(l.location);
+    }
   });
-  const topLocation = Object.entries(locMap).sort((a,b) => b[1]-a[1])[0];
+  const locGroupSorted = Object.entries(locGroupHours).sort((a,b) => b[1]-a[1]);
+  const topLocation = locGroupSorted[0];
 
   const catMap = {};
   timeLogs.forEach(t => {
@@ -210,6 +237,18 @@ function render(scans, timeLogs) {
         <div class="card">
           <h2>作業場所の内訳</h2>
           <div class="chart-wrap"><canvas id="locChart"></canvas></div>
+          ${ungroupedLocs.size > 0 ? `
+            <div style="margin-top:12px">
+              <div style="color:var(--orange);font-size:0.8rem;margin-bottom:8px">⚠ 未分類の場所（グループを割り当て）</div>
+              ${[...ungroupedLocs].map(loc => {
+                const opts = LOCATION_GROUPS.map(g => `<option value="${g}">${g}</option>`).join("");
+                return `<div class="edit-row" style="margin-bottom:4px">
+                  <span style="flex:1;font-size:0.85rem">${loc}</span>
+                  <select style="width:100px;margin:0" onchange="assignLocGroup('${loc.replace(/'/g,"\\'")}', this.value)">${opts}</select>
+                </div>`;
+              }).join("")}
+            </div>
+          ` : ""}
         </div>
         <div class="card">
           <h2>カテゴリ別 作業時間</h2>
@@ -254,15 +293,13 @@ function render(scans, timeLogs) {
 
   if (locChart) locChart.destroy();
   const locCtx = document.getElementById("locChart").getContext("2d");
-  const locEntries = Object.entries(locMap).sort((a,b) => b[1]-a[1]);
-  const locColors = ["#fb923c", "#38bdf8", "#34d399", "#f472b6", "#fbbf24", "#818cf8"];
   locChart = new Chart(locCtx, {
     type: "doughnut",
     data: {
-      labels: locEntries.map(([l]) => l),
+      labels: locGroupSorted.map(([g]) => g),
       datasets: [{
-        data: locEntries.map(([,c]) => c),
-        backgroundColor: locEntries.map((_,i) => locColors[i % locColors.length]),
+        data: locGroupSorted.map(([,h]) => h),
+        backgroundColor: locGroupSorted.map(([g]) => LOC_GROUP_COLORS[g] || "#64748b"),
         borderWidth: 0,
       }]
     },
@@ -312,6 +349,16 @@ async function saveReclassify(logId) {
   } else {
     loadData();
   }
+}
+
+async function assignLocGroup(locName, groupName) {
+  const { data: existing } = await sb.from("location_groups").select("id").eq("location_name", locName).single();
+  if (existing) {
+    await sb.from("location_groups").update({ group_name: groupName }).eq("id", existing.id);
+  } else {
+    await sb.from("location_groups").insert({ location_name: locName, group_name: groupName });
+  }
+  loadData();
 }
 
 let _editScanId = null;
