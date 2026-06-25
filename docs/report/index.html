@@ -59,9 +59,19 @@
   .day-cat.unknown:hover { background: #991b1b; }
 
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
-  .modal { background: var(--surface); border-radius: 12px; padding: 24px; min-width: 320px; }
+  .modal { background: var(--surface); border-radius: 12px; padding: 24px; min-width: 360px; max-width: 500px; max-height: 90vh; overflow-y: auto; }
   .modal h3 { font-size: 1rem; margin-bottom: 16px; }
-  .modal select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--surface2); background: var(--bg); color: var(--text); font-size: 0.95rem; margin-bottom: 16px; }
+  .modal select, .modal input[type="text"], .modal input[type="number"] { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--surface2); background: var(--bg); color: var(--text); font-size: 0.9rem; margin-bottom: 8px; }
+  .modal label { display: block; color: var(--text2); font-size: 0.8rem; margin-bottom: 4px; margin-top: 8px; }
+  .edit-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .edit-row select { flex: 1; margin-bottom: 0; }
+  .edit-row input[type="number"] { width: 70px; margin-bottom: 0; }
+  .edit-row .btn-del { background: #7f1d1d; color: #fca5a5; padding: 6px 10px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+  .btn-add { background: var(--surface2); color: var(--text); padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem; margin-bottom: 12px; }
+  .section-divider { border-top: 1px solid var(--surface2); margin: 12px 0; }
+
+  tr.editable { cursor: pointer; }
+  tr.editable:hover td { background: var(--surface2); }
   .modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
   .modal-btns button { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 0.9rem; }
   .btn-save { background: var(--accent); color: var(--bg); font-weight: 600; }
@@ -179,7 +189,7 @@ function render(scans, timeLogs) {
                     }
                     return `<span class="day-cat">${t.category} ${parseFloat(t.hours)}h</span>`;
                   }).join("");
-                return `<tr>
+                return `<tr class="editable" onclick="openEditDay('${s.id}', '${s.scan_date}')">
                   <td class="date">${s.scan_date}</td>
                   <td class="location">${s.work_location || "-"}</td>
                   <td class="task" title="${s.main_task || ""}">${s.main_task || "-"}</td>
@@ -302,6 +312,123 @@ async function saveReclassify(logId) {
   } else {
     loadData();
   }
+}
+
+let _editScanId = null;
+
+async function openEditDay(scanId, scanDate) {
+  _editScanId = scanId;
+
+  // 既存データ取得
+  const { data: scan } = await sb.from("activity_scans").select("*").eq("id", scanId).single();
+  const { data: timeLogs } = await sb.from("activity_time_logs").select("*").eq("scan_id", scanId).order("hours", { ascending: false });
+  const { data: locLogs } = await sb.from("location_time_logs").select("*").eq("scan_id", scanId).order("hours", { ascending: false });
+
+  const catOptions = ALL_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join("");
+
+  const timeRows = (timeLogs || []).map((t, i) => buildTimeRow(i, t.category, t.hours, catOptions)).join("");
+  const locRows = (locLogs || []).map((l, i) => buildLocRow(i, l.location, l.hours)).join("");
+
+  const modal = document.createElement("div");
+  modal.className = "modal-overlay";
+  modal.innerHTML = `
+    <div class="modal">
+      <h3>${scanDate} の編集</h3>
+
+      <label>作業場所</label>
+      <input type="text" id="editLocation" value="${scan?.work_location || ""}">
+
+      <label>作業内容</label>
+      <input type="text" id="editMainTask" value="${scan?.main_task || ""}">
+
+      <div class="section-divider"></div>
+      <label>活動カテゴリ × 時間</label>
+      <div id="editTimeRows">${timeRows}</div>
+      <button class="btn-add" onclick="addTimeRow()">＋ カテゴリ追加</button>
+
+      <div class="section-divider"></div>
+      <label>作業場所 × 時間</label>
+      <div id="editLocRows">${locRows}</div>
+      <button class="btn-add" onclick="addLocRow()">＋ 場所追加</button>
+
+      <div class="section-divider"></div>
+      <div class="modal-btns">
+        <button class="btn-cancel" onclick="this.closest('.modal-overlay').remove()">キャンセル</button>
+        <button class="btn-save" onclick="saveEditDay()">保存</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
+}
+
+let _timeIdx = 100, _locIdx = 100;
+const _catOptionsCache = ALL_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join("");
+
+function buildTimeRow(idx, category, hours, catOptions) {
+  const opts = catOptions || _catOptionsCache;
+  const selected = opts.replace(`value="${category}"`, `value="${category}" selected`);
+  return `<div class="edit-row" data-idx="${idx}">
+    <select>${selected}</select>
+    <input type="number" step="0.5" min="0" value="${hours}">
+    <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+  </div>`;
+}
+
+function buildLocRow(idx, location, hours) {
+  return `<div class="edit-row" data-idx="${idx}">
+    <input type="text" value="${location}" placeholder="場所名" style="flex:1">
+    <input type="number" step="0.5" min="0" value="${hours}">
+    <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+  </div>`;
+}
+
+function addTimeRow() {
+  document.getElementById("editTimeRows").insertAdjacentHTML("beforeend", buildTimeRow(_timeIdx++, "その他", 0));
+}
+
+function addLocRow() {
+  document.getElementById("editLocRows").insertAdjacentHTML("beforeend", buildLocRow(_locIdx++, "", 0));
+}
+
+async function saveEditDay() {
+  const scanId = _editScanId;
+  const location = document.getElementById("editLocation").value.trim();
+  const mainTask = document.getElementById("editMainTask").value.trim();
+
+  // カテゴリ時間を収集
+  const timeRows = document.querySelectorAll("#editTimeRows .edit-row");
+  const timeData = [];
+  const webCats = ["会議", "Web作業", "AI活用", "調査・リサーチ", "その他"];
+  timeRows.forEach(row => {
+    const cat = row.querySelector("select").value;
+    const hrs = parseFloat(row.querySelector("input[type=number]").value) || 0;
+    if (hrs > 0) {
+      timeData.push({ scan_id: scanId, category: cat, hours: hrs, source: webCats.includes(cat) ? "web" : "file" });
+    }
+  });
+
+  // 場所時間を収集
+  const locRows = document.querySelectorAll("#editLocRows .edit-row");
+  const locData = [];
+  locRows.forEach(row => {
+    const inputs = row.querySelectorAll("input");
+    const loc = inputs[0].value.trim();
+    const hrs = parseFloat(inputs[1].value) || 0;
+    if (loc && hrs > 0) {
+      locData.push({ scan_id: scanId, location: loc, hours: hrs });
+    }
+  });
+
+  // DB更新
+  await sb.from("activity_time_logs").delete().eq("scan_id", scanId);
+  await sb.from("location_time_logs").delete().eq("scan_id", scanId);
+  if (timeData.length > 0) await sb.from("activity_time_logs").insert(timeData);
+  if (locData.length > 0) await sb.from("location_time_logs").insert(locData);
+  await sb.from("activity_scans").update({ work_location: location, main_task: mainTask }).eq("id", scanId);
+
+  document.querySelector(".modal-overlay")?.remove();
+  loadData();
 }
 
 document.getElementById("prevMonth").onclick = () => {

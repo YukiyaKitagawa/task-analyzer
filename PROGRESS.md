@@ -35,3 +35,12 @@
   - Supabase Edge Function `line-webhook` デプロイ（全角スペース対応済み）
   - LINE Webhook接続完了、自動応答OFF設定済み
   - LINE返信テスト成功（6/25分: 資料2.5h, AI5h, 他0.5h）
+- GitHub Pages レポートサイト公開
+  - 月次: https://yukiyakitagawa.github.io/task-analyzer/report/
+  - 年次: https://yukiyakitagawa.github.io/task-analyzer/report/yearly.html
+  - 不明カテゴリの再分類機能（元の入力表示付き）
+  - 場所別時間記録（location_time_logs テーブル）
+  - ZOOM等の表記ゆれ対応済み
+  - 日別ログ編集機能（カテゴリ・時間・場所・作業内容の編集モーダル）
+  - 場所1箇所の場合は時間省略可（合計時間を自動設定）
+  - 休み対応（休み/有休/代休等のLINE返信でholidayとして記録、稼働日数に含めない）
