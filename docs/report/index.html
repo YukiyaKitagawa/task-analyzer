@@ -76,6 +76,8 @@
   .modal-btns button { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 0.9rem; }
   .btn-save { background: var(--accent); color: var(--bg); font-weight: 600; }
   .btn-cancel { background: var(--surface2); color: var(--text); }
+  .btn-danger { background: #7f1d1d; color: #fca5a5; font-weight: 600; margin-right: auto; }
+  .btn-danger:hover { background: #991b1b; }
 
   .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
   .tag-unknown { background: #7f1d1d; color: #fca5a5; }
@@ -400,6 +402,7 @@ async function openEditDay(scanId, scanDate) {
 
       <div class="section-divider"></div>
       <div class="modal-btns">
+        <button class="btn-danger" onclick="deleteScanDay('${scanId}', '${scanDate}')">削除</button>
         <button class="btn-cancel" onclick="this.closest('.modal-overlay').remove()">キャンセル</button>
         <button class="btn-save" onclick="saveEditDay()">保存</button>
       </div>
@@ -407,6 +410,23 @@ async function openEditDay(scanId, scanDate) {
   `;
   document.body.appendChild(modal);
   modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
+}
+
+async function deleteScanDay(scanId, scanDate) {
+  if (!confirm(`${scanDate} のレコードを完全に削除しますか？\nファイル・Web履歴・作業時間の記録もすべて削除され、元に戻せません。`)) return;
+
+  await sb.from("activity_time_logs").delete().eq("scan_id", scanId);
+  await sb.from("location_time_logs").delete().eq("scan_id", scanId);
+  await sb.from("file_logs").delete().eq("scan_id", scanId);
+  await sb.from("browser_logs").delete().eq("scan_id", scanId);
+  const { error } = await sb.from("activity_scans").delete().eq("id", scanId);
+
+  document.querySelector(".modal-overlay")?.remove();
+  if (error) {
+    alert("削除に失敗しました: " + error.message);
+  } else {
+    loadData();
+  }
 }
 
 let _timeIdx = 100, _locIdx = 100;
