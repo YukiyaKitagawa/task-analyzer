@@ -166,7 +166,8 @@ async function loadData() {
 
 function render(scans, timeLogs, locLogs) {
   const totalHours = timeLogs.reduce((s, t) => s + parseFloat(t.hours), 0);
-  const workDays = scans.filter(s => s.review_status !== "draft" && s.review_status !== "holiday").length;
+  const loggedScanIds = new Set(timeLogs.filter(t => parseFloat(t.hours) > 0).map(t => t.scan_id));
+  const workDays = scans.filter(s => s.review_status !== "holiday" && loggedScanIds.has(s.id)).length;
   const avgHours = workDays > 0 ? (totalHours / workDays).toFixed(1) : "0";
 
   // 場所をグループ別に時間集計
